@@ -2,20 +2,36 @@ import re
 import threading
 
 # --- 1. SETUP ---
+console.clear()
 LINT_VERSION = str(0.1)
 LINT_INDICATOR = 12 # Scintilla has 32 indicator slots. 8 is usually completely safe/unused.
 ERROR_STYLE = 200
 errors = []
-print("RAPIDLINTER V{} LAUNCHED".format(LINT_VERSION))
+description_text = ('RAPID-LINTER V{} LAUNCHED'.format(LINT_VERSION),
+      'Developed for python 2.7.18',
+      'Uses Notepad++ with "Python Script" plugin',
+      'Python Script-Dave Brotherstone V2.1.0.0'
+      )
+
+data_types = ('num', 'dnum', 'string', 'bool', 'record',
+              'pos', 'orient', 'pose', 'robtarget', 'jointtarget', 'extjoin', 'confdata',
+              'tooldata', 'wobjdata', 'loaddata',
+              'speeddata', 'zonedata', 'stoppointdata',
+              'clock', 'btnres',
+              'byte', 'errnum', 'intnum', 'trapdata', 'symnum' )
+
+for i, text in enumerate(description_text):
+    print(text)
+
 
 # --- 2. THE LINTING LOGIC ---
 def run_linter():
     text = editor.getText() # Grab file's text
     lines = text.splitlines() # Split into lines
     open_procs = []
+    open_blocks = []
     module_present = [False, None, None]
     set_styles()
-    print("CHECKING LINES")
     # Safety check: Only run this on ABB RAPID files
     filename = notepad.getCurrentFilename().lower()
     if not filename.endswith(('.mod', '.prg', '.sys')):
@@ -31,20 +47,25 @@ def run_linter():
 
         # Check A: Missing Semicolon
         if not clean_line.endswith(';') and first_word not in keywords and not clean_line.endswith(':'):
+            adj = len(line) - len(line.lstrip())
+            err_text = (len(line)-adj-1)*' '+'^'
             draw_squiggle(line_num, line)
+            annotate_errors(line_num, err_text + '\n' + 'ERROR: Missing a ";" in indicated position')
 
         # Check B: Open and Close FUNC PROC MODULE check
         open_pattern = r'^\s*(FUNC|PROC|ENDFUNC|ENDPROC|MODULE|ENDMODULE)(\s+.*)?'
         proc_match = re.match(open_pattern, clean_line, re.IGNORECASE)
         if proc_match:
             if open_procs:
-                if proc_match.group(1) in ('FUNC', 'PROC'):
+                if proc_match.group(1).upper() in ('FUNC', 'PROC'):
+                    proc_syntax(line_num, line, proc_match.group(1))
                     draw_squiggle(open_procs[-1][1], open_procs[-1][2])
                     draw_squiggle(line_num, line)
                     annotate_errors(line_num, "ERROR: {} Opened Before Prev {} Closed: Line# {}-{}".format(proc_match.group(1), open_procs[-1][0], open_procs[-1][1]+1, line_num+1))
                     open_procs.pop()
                     open_procs.append((proc_match.group(1), line_num, line))
-                elif proc_match.group(1) in ('ENDFUNC', 'ENDPROC'):
+
+                elif proc_match.group(1).upper() in ('ENDFUNC', 'ENDPROC'):
                     if open_procs[-1][0] == proc_match.group(1)[3:len(proc_match.group(1))]:
                         open_procs.pop()
                     else:
@@ -52,24 +73,24 @@ def run_linter():
                         draw_squiggle(line_num, line)
                         annotate_errors(line_num, "ERROR: {} Should be Ended with END{}".format(open_procs[-1][0], open_procs[-1][0]))
                         open_procs.pop()
-                elif proc_match.group(1) == 'MODULE':
+
+                elif proc_match.group(1).upper() == 'MODULE':
                     if module_present[0] == False:
                         module_present[0] = True
                         endmodule_err = find_endmodule(text)
                     else:
-                        print("MODULE ERROR")
                         draw_squiggle(line_num, line)
                         annotate_errors(line_num, "ERROR: Only 1 MODULE allowed per file")
+
                 elif proc_match.group(1) == 'ENDMODULE':
                     if endmodule_err[0] == 1:
                         draw_squiggle(line_num, line, len(endmodule_err[1]))
                         start_pos = (len(line)-len(line.lstrip()))+len(endmodule_err[1])
-                        carrot_pos = start_pos*' ' + '^'
-                        if len(carrot_pos) > 3: carrot_pos = carrot_pos[3:]
-                        annotate_errors(line_num, carrot_pos)
-                        annotate_errors(line_num, 'ERROR: "!" Should be the First Character After ENDMODULE')
+                        caret_pos = start_pos*' ' + '^'
+                        if len(caret_pos) > 3: caret_pos = caret_pos[3:]
+                        annotate_errors(line_num, caret_pos + '\n' + 'ERROR: "!" Should be the First Character After ENDMODULE')
             else:
-                if proc_match.group(1) in ('ENDFUNC', 'ENDPROC'):
+                if proc_match.group(1).upper() in ('ENDFUNC', 'ENDPROC'):
                     suffix = proc_match.group(1)[3:]
                     draw_squiggle(line_num, line)
                     annotate_errors(line_num, "ERROR: {} Ended Before {} Was Ever Opened".format(suffix, suffix))
@@ -78,21 +99,46 @@ def run_linter():
                         module_present[0] = True
                         endmodule_err = find_endmodule(text)
                     else: 
-                        print("MODULE ERROR")
                         draw_squiggle(line_num, line)
                         annotate_errors(line_num, "ERROR: Only 1 MODULE allowed per file")
-                elif proc_match.group(1) == 'ENDMODULE':
-                    if endmodule_err[0] == 1:
-                        draw_squiggle(line_num, line, len(endmodule_err[1]))
-                        start_pos = (len(line)-len(line.lstrip()))+len(endmodule_err[1])
-                        carrot_pos = start_pos*' ' + '^'
-                        if len(carrot_pos) > 3: carrot_pos = carrot_pos[3:]
-                        annotate_errors(line_num, carrot_pos)
-                        annotate_errors(line_num-1, 'ERROR: "!" Should be the First Character After ENDMODULE')
-                else: open_procs.append((proc_match.group(1), line_num, line))
+                elif proc_match.group(1).upper() == 'ENDMODULE':
+                    if module_present[0] == True:
+                        if endmodule_err[0] == 1:
+                            draw_squiggle(line_num, line, len(endmodule_err[1]))
+                            start_pos = (len(line)-len(line.lstrip()))+len(endmodule_err[1])
+                            caret_pos = start_pos*' ' + '^'
+                            if len(caret_pos) > 3: caret_pos = caret_pos[3:]
+                            annotate_errors(line_num, caret_pos + '\n' + 'ERROR: "!" Should be the First Character After ENDMODULE')
+                    else:
+                        draw_squiggle(line_num, line)
+                        annotate_errors(line_num, "ERROR: ENDMODULE Called Before MODULE")
+                else: 
+                    if proc_match.group(1).upper() in ('PROC', 'FUNC'): proc_syntax(line_num, line, proc_match.group(1))
+                    open_procs.append((proc_match.group(1), line_num, line))
+
+        else:
+            pass
+            #r'^\s*(IF)\s+(\S+\(?:\(\))?)\s+(.+)\s*(.+)\s*()
+            '''
+            control_pattern = r'^(\s*)(IF|FOR|WHILE|TEST|TRAP|ENDIF|ENDFOR|ENDWHILE|ENDTEST|ENDTRAP)(.*)$'
+            control_match = re.match(control_pattern, line, re.IGNORECASE)
+            if control_match:
+                function = syntax_checkers[control_match.group(2)]
+                if control_match.group(2) in 'IF|FOR|WHILE|TEST|TRAP': open_blocks.append((control_match.group(2), line_num, line))
+                else:
+                    if open_blocks[-1][0] == control_match.group(2)[3:]:
+                        print(open_blocks[-1][0] + " AND " + control_match.group(2)[3:] +" MATCH " + "LN: " + str(open_blocks[-1][1]))
+                        open_blocks.pop()
+                    else:
+                        draw_squiggle(line_num, line)
+                        draw_squiggle(open_blocks[-1][1], open_blocks[-1][2])
+                        annotate_errors(open_blocks[-1][1], 'ERROR: There is No END{} For This Open {}'.format(open_blocks[-1][0], open_blocks[-1][0]))
+                        annotate_errors(line_num, 'ERROR: There is No {} For This {} To Close'.format(control_match.group(2)[3:], control_match.group(2)))
+                function(line_num, line)'''
+
 
 # --- 3. THE DRAWING FUNCTION ---
-def draw_squiggle(line_num, line_text, err_gap=0):
+def draw_squiggle(line_num, line_text, err_gap=0, draw_len=0):
     # Scintilla doesn't draw by line number; it needs absolute character indexes.
     start_pos = editor.positionFromLine(line_num)
     
@@ -100,6 +146,7 @@ def draw_squiggle(line_num, line_text, err_gap=0):
     leading_spaces = len(line_text) - len(line_text.lstrip())
     start_pos = start_pos + leading_spaces + err_gap
     length = len(line_text.strip())-err_gap
+    if draw_len != 0: length = draw_len
     if length > 0:
         editor.setIndicatorCurrent(LINT_INDICATOR)
         editor.indicatorFillRange(start_pos, length)
@@ -139,6 +186,72 @@ def set_styles():
 
 # --- 6. TIMER ---
 lint_timer = None
+
+def proc_syntax(line_num, line, proc_func):
+    if proc_func.upper() == 'PROC':
+        proc_pattern = r'^\s*?(PROC)\s+(\S+\(.*\))\s*(\!.*)?$'
+        proc_match = re.match(proc_pattern, line)
+        if proc_match: return
+        else:
+            draw_squiggle(line_num, line)
+            annotate_errors(line_num, 'ERROR: PROC Syntax Incorrect\nCorrect EX: PROC SomeProc() ! Some Comment')
+    elif proc_func.upper() == 'FUNC':
+        func_pattern = r'^\s*?(FUNC)\s+(\S+)\s+(\S+\(.*\))\s*(\!\s*.*)?\s*$'
+        func_match = re.match(func_pattern, line)
+        if func_match: 
+            if func_match.group(2).lower() in data_types: return
+            else:
+                start_pos = func_match.start(2)
+                length = func_match.end(2) - start_pos
+                draw_squiggle(line_num, line, start_pos, length)
+                annotate_errors(line_num, 'ERROR: Return Variable Does Not Match Any Accepted FUNC Returns')
+        else:
+            draw_squiggle(line_num, line)
+            annotate_errors(line_num, 'ERROR: FUNC Syntax Incorrect\nCorrect EX: FUNC num SomeFunc() ! Some Comment')
+
+
+def if_syntax(line_num, line):
+    pass
+
+def for_syntax(line_num, line):
+    pass
+
+def test_syntax(line_num, line):
+    pass
+
+def while_syntax(line_num, line):
+    pass
+
+def trap_syntax(line_num, line):
+    pass
+
+def endif_syntax(line_num, line):
+    pass
+
+def endfor_syntax(line_num, line):
+    pass
+
+def endtest_syntax(line_num, line):
+    pass
+
+def endwhile_syntax(line_num, line):
+    pass
+
+def endtrap_syntax(line_num, line):
+    pass
+
+syntax_checkers = {
+    'IF': if_syntax,
+    'FOR': for_syntax,
+    'TEST': test_syntax,
+    'WHILE': while_syntax,
+    'TRAP': trap_syntax,
+    'ENDIF': endif_syntax,
+    'ENDFOR': endfor_syntax,
+    'ENDTEST': endtest_syntax,
+    'ENDWHILE': endwhile_syntax,
+    'ENDTRAP': endtrap_syntax
+}
 
 def find_endmodule(text): # -> (int, None/str/tuple, None/str)
     # Index 0 is the error mode. Index 1 and 2 are syntax error strings or line locations
