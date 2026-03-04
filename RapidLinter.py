@@ -7,11 +7,7 @@ LINT_VERSION = str(0.1)
 LINT_INDICATOR = 12 # Scintilla has 32 indicator slots. 8 is usually completely safe/unused.
 ERROR_STYLE = 200
 errors = []
-description_text = ('RAPID-LINTER V{} LAUNCHED'.format(LINT_VERSION),
-      'Developed for python 2.7.18',
-      'Uses Notepad++ with "Python Script" plugin',
-      'Python Script-Dave Brotherstone V2.1.0.0'
-      )
+description_text = 'RAPID-LINTER V{} LAUNCHED\nDeveloped for python 2.7.18\nUses Notepad++ with "Python Script" plugin\nPython Script-Dave Brotherstone V2.1.0.0'.format(LINT_VERSION)
 
 data_types = ('num', 'dnum', 'string', 'bool', 'record',
               'pos', 'orient', 'pose', 'robtarget', 'jointtarget', 'extjoin', 'confdata',
@@ -20,18 +16,16 @@ data_types = ('num', 'dnum', 'string', 'bool', 'record',
               'clock', 'btnres',
               'byte', 'errnum', 'intnum', 'trapdata', 'symnum' )
 
-for i, text in enumerate(description_text):
-    print(text)
-
-
 # --- 2. THE LINTING LOGIC ---
 def run_linter():
+    console.clear()
     text = editor.getText() # Grab file's text
     lines = text.splitlines() # Split into lines
     open_procs = []
     open_blocks = []
     module_present = [False, None, None]
     set_styles()
+    print(description_text)
     # Safety check: Only run this on ABB RAPID files
     filename = notepad.getCurrentFilename().lower()
     if not filename.endswith(('.mod', '.prg', '.sys')):
@@ -40,6 +34,7 @@ def run_linter():
     for line_num, line in enumerate(lines):
         clean_line = line.strip().split('!')[0] # Ignore comments
         if not clean_line:
+            #print("Line #: {} is a clean line.\n{}\n".format(line_num, line))
             continue
 
         keywords = ['FUNC', 'ENDFUNC', 'PROC', 'ENDPROC', 'MODULE', 'ENDMODULE', 'IF', 'ELSEIF', 'ELSE', 'ENDIF', 'WHILE', 'ENDWHILE', 'FOR', 'ENDFOR', 'TRAP', 'ENDTRAP', 'TEST', 'CASE', 'DEFAULT', 'ENDTEST', 'VAR', 'PERS', 'CONST', 'ERROR']
@@ -117,25 +112,34 @@ def run_linter():
                     open_procs.append((proc_match.group(1), line_num, line))
 
         else:
-            pass
-            #r'^\s*(IF)\s+(\S+\(?:\(\))?)\s+(.+)\s*(.+)\s*()
-            '''
-            control_pattern = r'^(\s*)(IF|FOR|WHILE|TEST|TRAP|ENDIF|ENDFOR|ENDWHILE|ENDTEST|ENDTRAP)(.*)$'
+            # Check C: Open and Close Conditional Blocks
+            control_pattern = r'^\s*(IF|FOR|WHILE|TEST|TRAP|ENDIF|ENDFOR|ENDWHILE|ENDTEST|ENDTRAP)(.*)$'
             control_match = re.match(control_pattern, line, re.IGNORECASE)
             if control_match:
-                function = syntax_checkers[control_match.group(2)]
-                if control_match.group(2) in 'IF|FOR|WHILE|TEST|TRAP': open_blocks.append((control_match.group(2), line_num, line))
+                keyword = control_match.group(1).upper()
+                function = syntax_checkers[control_match.group(1).upper()]
+
+                if control_match.group(1) in 'IF|FOR|WHILE|TEST|TRAP':
+                    condition = control_match.group(2).strip()
+                    if not condition or condition[-1] != ';':
+                        open_blocks.append((keyword, line_num, line))
                 else:
-                    if open_blocks[-1][0] == control_match.group(2)[3:]:
-                        print(open_blocks[-1][0] + " AND " + control_match.group(2)[3:] +" MATCH " + "LN: " + str(open_blocks[-1][1]))
+                    expected_opener = keyword[3:]
+
+                    if not open_blocks:
+                        draw_squiggle(line_num, line)
+                        annotate_errors(line_num, "ERROR: {} found without a matching {}".format(keyword, expected_opener))
+                    elif open_blocks[-1][0].upper() == expected_opener:
                         open_blocks.pop()
                     else:
                         draw_squiggle(line_num, line)
-                        draw_squiggle(open_blocks[-1][1], open_blocks[-1][2])
-                        annotate_errors(open_blocks[-1][1], 'ERROR: There is No END{} For This Open {}'.format(open_blocks[-1][0], open_blocks[-1][0]))
-                        annotate_errors(line_num, 'ERROR: There is No {} For This {} To Close'.format(control_match.group(2)[3:], control_match.group(2)))
-                function(line_num, line)'''
+                        annotate_errors(line_num, "ERROR: Expected END{} but found {}".format(open_blocks[-1][0], keyword))
+                function(line_num, line)
 
+    if open_blocks:
+        for i, leftovers in enumerate(open_blocks):
+            draw_squiggle(leftovers[1], leftovers[2])
+            annotate_errors(leftovers[1], "ERROR: {} Block Was Never Closed! Check For Missing END{}".format(leftovers[0], leftovers[0]))
 
 # --- 3. THE DRAWING FUNCTION ---
 def draw_squiggle(line_num, line_text, err_gap=0, draw_len=0):
@@ -211,33 +215,43 @@ def proc_syntax(line_num, line, proc_func):
 
 
 def if_syntax(line_num, line):
+    print("Check IF Syntax")
     pass
 
 def for_syntax(line_num, line):
+    print("Check FOR Syntax")
     pass
 
 def test_syntax(line_num, line):
+    print("Check TEST Syntax")
     pass
 
 def while_syntax(line_num, line):
+    print("Check WHILE Syntax")
     pass
 
 def trap_syntax(line_num, line):
+    print("Check TRAP Syntax")
     pass
 
 def endif_syntax(line_num, line):
+    print("Check ENDIF Syntax")
     pass
 
 def endfor_syntax(line_num, line):
+    print("Check ENDFOR Syntax")
     pass
 
 def endtest_syntax(line_num, line):
+    print("Check ENDTEST Syntax")
     pass
 
 def endwhile_syntax(line_num, line):
+    print("Check ENDWHILE Syntax")
     pass
 
 def endtrap_syntax(line_num, line):
+    print("Check ENDTRAP Syntax")
     pass
 
 syntax_checkers = {
